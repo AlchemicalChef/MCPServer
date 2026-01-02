@@ -15,6 +15,8 @@ import { registerScanGitHistoryTool } from './scanGitHistory.js';
 import { registerGenerateSbomTool } from './generateSbom.js';
 import { registerAnalyzeDataflowTool } from './analyzeDataflow.js';
 import { registerCalculateCvssTool } from './calculateCvss.js';
+// Lab/Research tools
+import { registerInjectDebuggerTool } from './injectDebugger.js';
 
 export function registerTools(server: McpServer): void {
   // Security scanning tools
@@ -39,4 +41,7 @@ export function registerTools(server: McpServer): void {
   registerGenerateSbomTool(server);
   registerAnalyzeDataflowTool(server);
   registerCalculateCvssTool(server);
+
+  // Lab/Research tools (authorized use only)
+  registerInjectDebuggerTool(server);
 }
