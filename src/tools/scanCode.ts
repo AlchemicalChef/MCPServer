@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 interface VulnerabilityPattern {
   id: string;
@@ -332,6 +334,13 @@ export function registerScanCodeTool(server: McpServer): void {
         .describe('Minimum severity level to report'),
     },
     async ({ target, recursive, severity }) => {
+      // Sanitize all string inputs
+      const sanitizedTarget = sanitize(target);
+      const validation = validateInput(target);
+
+      // Audit log the invocation
+      logToolInvocation('scan-code', { target, recursive, severity }, validation.warnings);
+
       const findings: Finding[] = [];
       const severityOrder = ['critical', 'high', 'medium', 'low'];
       const minSeverityIndex = severity === 'all' ? 3 : severityOrder.indexOf(severity);
@@ -362,7 +371,7 @@ export function registerScanCodeTool(server: McpServer): void {
         }
       }
 
-      await scanPath(target);
+      await scanPath(sanitizedTarget);
 
       // Filter by severity
       const filteredFindings = findings.filter(f => {
@@ -379,7 +388,7 @@ export function registerScanCodeTool(server: McpServer): void {
         return {
           content: [{
             type: 'text' as const,
-            text: `No vulnerabilities found in ${target}`,
+            text: `No vulnerabilities found in ${sanitizedTarget}`,
           }],
         };
       }

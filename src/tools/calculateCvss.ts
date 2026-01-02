@@ -1,5 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 // CVSS v3.1 Constants
 const CVSS_WEIGHTS = {
@@ -374,6 +376,9 @@ export function registerCalculateCvssTool(server: McpServer): void {
       showDetails,
       listPresets,
     }) => {
+      // Audit log
+      logToolInvocation('calculate-cvss', { preset, vector, listPresets }, []);
+
       // List presets mode
       if (listPresets) {
         const presetResults = Object.entries(VULNERABILITY_PRESETS).map(([name, metrics]) => {

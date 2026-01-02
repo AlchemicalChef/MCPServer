@@ -1,5 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 interface SarifResult {
   ruleId: string;
@@ -171,7 +173,15 @@ export function registerExportSarifTool(server: McpServer): void {
       toolVersion: z.string().default('1.0.0').describe('Version of the scanning tool'),
     },
     async ({ findings, toolName, toolVersion }) => {
-      const parsedFindings = parseFindings(findings);
+      // Sanitize inputs
+      const sanitizedFindings = sanitize(findings);
+      const sanitizedToolName = sanitize(toolName);
+      const validation = validateInput(findings);
+
+      // Audit log
+      logToolInvocation('export-sarif', { toolName, toolVersion, findingsLength: findings.length }, validation.warnings);
+
+      const parsedFindings = parseFindings(sanitizedFindings);
 
       if (parsedFindings.length === 0) {
         return {

@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 interface IaCFinding {
   id: string;
@@ -301,6 +303,13 @@ export function registerScanIaCTool(server: McpServer): void {
         .describe('Minimum severity level to report'),
     },
     async ({ target, recursive, severity }) => {
+      // Sanitize inputs
+      const sanitizedTarget = sanitize(target);
+      const validation = validateInput(target);
+
+      // Audit log
+      logToolInvocation('scan-iac', { target, recursive, severity }, validation.warnings);
+
       const findings: IaCFinding[] = [];
       const severityOrder = ['critical', 'high', 'medium', 'low'];
       const minSeverityIndex = severity === 'all' ? 3 : severityOrder.indexOf(severity);

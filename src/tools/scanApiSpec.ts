@@ -1,6 +1,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 interface ApiSecurityFinding {
   id: string;
@@ -262,8 +264,15 @@ export function registerScanApiSpecTool(server: McpServer): void {
       target: z.string().describe('Path to OpenAPI/Swagger spec file (JSON or YAML)'),
     },
     async ({ target }) => {
+      // Sanitize inputs
+      const sanitizedTarget = sanitize(target);
+      const validation = validateInput(target);
+
+      // Audit log
+      logToolInvocation('scan-api-spec', { target }, validation.warnings);
+
       try {
-        const content = await fs.readFile(target, 'utf-8');
+        const content = await fs.readFile(sanitizedTarget, 'utf-8');
         let spec: OpenApiSpec;
 
         // Parse JSON or YAML

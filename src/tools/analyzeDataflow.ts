@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 interface TaintSource {
   name: string;
@@ -475,6 +477,13 @@ export function registerAnalyzeDataflowTool(server: McpServer): void {
       minConfidence: z.enum(['high', 'medium', 'low']).default('low').describe('Minimum confidence level for findings'),
     },
     async ({ target, recursive, trackVariables, minConfidence }) => {
+      // Sanitize inputs
+      const sanitizedTarget = sanitize(target);
+      const validation = validateInput(target);
+
+      // Audit log
+      logToolInvocation('analyze-dataflow', { target, recursive, trackVariables, minConfidence }, validation.warnings);
+
       const findings: DataFlowFinding[] = [];
       const scannedFiles: string[] = [];
 

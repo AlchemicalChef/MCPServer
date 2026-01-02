@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 interface SecretPattern {
   id: string;
@@ -360,6 +362,13 @@ export function registerScanSecretsTool(server: McpServer): void {
       useEntropy: z.boolean().default(false).describe('Enable entropy-based detection for unknown secret formats'),
     },
     async ({ target, recursive, showValues, useEntropy }) => {
+      // Sanitize inputs
+      const sanitizedTarget = sanitize(target);
+      const validation = validateInput(target);
+
+      // Audit log
+      logToolInvocation('scan-secrets', { target, recursive, showValues, useEntropy }, validation.warnings);
+
       const findings: SecretFinding[] = [];
       const scannedFiles: string[] = [];
 

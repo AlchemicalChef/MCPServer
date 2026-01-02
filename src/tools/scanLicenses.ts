@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 interface LicenseInfo {
   name: string;
@@ -192,6 +194,13 @@ export function registerScanLicensesTool(server: McpServer): void {
         .describe('License policy: permissive (MIT, Apache, BSD), weak-copyleft (+ LGPL, MPL), any-oss (any OSI), all (show all)'),
     },
     async ({ target, policy }) => {
+      // Sanitize inputs
+      const sanitizedTarget = sanitize(target);
+      const validation = validateInput(target);
+
+      // Audit log
+      logToolInvocation('scan-licenses', { target, policy }, validation.warnings);
+
       let deps: DependencyLicense[] = [];
       let dependencyFile = '';
 

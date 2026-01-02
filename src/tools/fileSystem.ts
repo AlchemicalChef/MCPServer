@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 export function registerFileSystemTools(server: McpServer): void {
   // Read file tool
@@ -14,8 +16,15 @@ export function registerFileSystemTools(server: McpServer): void {
       endLine: z.number().optional().describe('Stop reading at this line (inclusive)'),
     },
     async ({ path: filePath, startLine, endLine }) => {
+      // Sanitize inputs
+      const sanitizedPath = sanitize(filePath);
+      const validation = validateInput(filePath);
+
+      // Audit log
+      logToolInvocation('read-file', { path: filePath, startLine, endLine }, validation.warnings);
+
       try {
-        const content = await fs.readFile(filePath, 'utf-8');
+        const content = await fs.readFile(sanitizedPath, 'utf-8');
         const lines = content.split('\n');
 
         let result: string;
@@ -60,6 +69,13 @@ export function registerFileSystemTools(server: McpServer): void {
       showHidden: z.boolean().default(false).describe('Show hidden files (starting with .)'),
     },
     async ({ path: dirPath, recursive, extensions, showHidden }) => {
+      // Sanitize inputs
+      const sanitizedPath = sanitize(dirPath);
+      const validation = validateInput(dirPath);
+
+      // Audit log
+      logToolInvocation('list-files', { path: dirPath, recursive, extensions, showHidden }, validation.warnings);
+
       const files: string[] = [];
 
       async function listDir(currentPath: string, depth: number = 0): Promise<void> {
@@ -144,6 +160,14 @@ export function registerFileSystemTools(server: McpServer): void {
       contextLines: z.number().default(2).describe('Lines of context before and after match'),
     },
     async ({ pattern, path: searchPath, recursive, caseSensitive, extensions, contextLines }) => {
+      // Sanitize inputs
+      const sanitizedPattern = sanitize(pattern);
+      const sanitizedPath = sanitize(searchPath);
+      const validation = validateInput(pattern);
+
+      // Audit log
+      logToolInvocation('grep-pattern', { pattern, path: searchPath, recursive, caseSensitive, extensions, contextLines }, validation.warnings);
+
       interface Match {
         file: string;
         line: number;
@@ -259,6 +283,13 @@ ${output}`,
         .describe('Programming language to focus on'),
     },
     async ({ path: searchPath, language }) => {
+      // Sanitize inputs
+      const sanitizedPath = sanitize(searchPath);
+      const validation = validateInput(searchPath);
+
+      // Audit log
+      logToolInvocation('find-dangerous-functions', { path: searchPath, language }, validation.warnings);
+
       const dangerousFunctions: Record<string, string[]> = {
         javascript: [
           'eval', 'Function', 'setTimeout.*string', 'setInterval.*string',

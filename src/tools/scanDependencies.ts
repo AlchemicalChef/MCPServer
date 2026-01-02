@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 interface DependencyInfo {
   name: string;
@@ -326,6 +328,13 @@ export function registerScanDependenciesTool(server: McpServer): void {
       target: z.string().describe('Project directory or dependency file path'),
     },
     async ({ target }) => {
+      // Sanitize inputs
+      const sanitizedTarget = sanitize(target);
+      const validation = validateInput(target);
+
+      // Audit log
+      logToolInvocation('scan-dependencies', { target }, validation.warnings);
+
       const vulnerabilities: VulnerabilityInfo[] = [];
       let dependencies: DependencyInfo[] = [];
       let dependencyFile = '';

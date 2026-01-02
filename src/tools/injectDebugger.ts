@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 type SupportedLanguage = 'javascript' | 'typescript' | 'python' | 'go' | 'php' | 'ruby';
 
@@ -325,6 +327,13 @@ export function registerInjectDebuggerTool(server: McpServer): void {
         .describe('Where to inject the debug code'),
     },
     async ({ code, language, callbackUrl, injectionPoint }) => {
+      // Sanitize inputs (note: code intentionally not sanitized as it's source code)
+      const sanitizedCallbackUrl = sanitize(callbackUrl);
+      const validation = validateInput(callbackUrl);
+
+      // Audit log
+      logToolInvocation('inject-debugger', { language, callbackUrl, injectionPoint, codeLength: code.length }, validation.warnings);
+
       let sourceCode = code;
       let detectedLanguage: SupportedLanguage | null = language || null;
       let isFilePath = false;

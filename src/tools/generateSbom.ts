@@ -3,6 +3,8 @@ import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 interface Component {
   type: 'library' | 'framework' | 'application';
@@ -304,8 +306,15 @@ export function registerGenerateSbomTool(server: McpServer): void {
       includeDevDeps: z.boolean().default(true).describe('Include development dependencies'),
     },
     async ({ target, format, includeDevDeps }) => {
+      // Sanitize inputs
+      const sanitizedTarget = sanitize(target);
+      const validation = validateInput(target);
+
+      // Audit log
+      logToolInvocation('generate-sbom', { target, format, includeDevDeps }, validation.warnings);
+
       try {
-        const stats = await fs.stat(target);
+        const stats = await fs.stat(sanitizedTarget);
         let dependencyFile = '';
         let parseResult: {
           metadata: { name: string; version?: string; description?: string };

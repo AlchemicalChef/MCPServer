@@ -1,5 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 interface HeaderCheck {
   name: string;
@@ -238,6 +240,20 @@ export function registerAnalyzeHeadersTool(server: McpServer): void {
         .describe('Type of endpoint being analyzed'),
     },
     async ({ headers, context }) => {
+      // Sanitize header values
+      const sanitizedHeaders: Record<string, string> = {};
+      const allWarnings: string[] = [];
+      for (const [key, value] of Object.entries(headers)) {
+        sanitizedHeaders[sanitize(key)] = sanitize(value);
+        const validation = validateInput(value);
+        if (!validation.safe) {
+          allWarnings.push(...validation.warnings);
+        }
+      }
+
+      // Audit log
+      logToolInvocation('analyze-headers', { headerCount: Object.keys(headers).length, context }, allWarnings);
+
       const results: Array<{
         header: string;
         severity: string;

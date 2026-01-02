@@ -2,6 +2,8 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
+import { sanitize, validateInput } from '../utils/sanitize.js';
+import { logToolInvocation } from '../utils/auditLog.js';
 
 const execAsync = promisify(exec);
 
@@ -138,6 +140,13 @@ export function registerScanGitHistoryTool(server: McpServer): void {
       showValues: z.boolean().default(false).describe('Show actual secret values (use with caution)'),
     },
     async ({ target, maxCommits, showValues }) => {
+      // Sanitize inputs
+      const sanitizedTarget = sanitize(target);
+      const validation = validateInput(target);
+
+      // Audit log
+      logToolInvocation('scan-git-history', { target, maxCommits, showValues }, validation.warnings);
+
       // Check if git is available
       try {
         await execAsync('git --version', { timeout: 5000 });
