@@ -17,6 +17,10 @@ import { registerAnalyzeDataflowTool } from './analyzeDataflow.js';
 import { registerCalculateCvssTool } from './calculateCvss.js';
 // Lab/Research tools
 import { registerInjectDebuggerTool } from './injectDebugger.js';
+import { registerAnalyzeAttackSurfaceTool } from './analyzeAttackSurface.js';
+import { registerGeneratePayloadsTool } from './generatePayloads.js';
+import { registerGenerateFormalModelTool } from './generateFormalModel.js';
+import { registerModelAuditTrailTool } from './modelAuditTrail.js';
 
 export function registerTools(server: McpServer): void {
   // Security scanning tools
@@ -44,4 +48,8 @@ export function registerTools(server: McpServer): void {
 
   // Lab/Research tools (authorized use only)
   registerInjectDebuggerTool(server);
+  registerAnalyzeAttackSurfaceTool(server);
+  registerGeneratePayloadsTool(server);
+  registerGenerateFormalModelTool(server);
+  registerModelAuditTrailTool(server);
 }

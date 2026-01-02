@@ -1,10 +1,42 @@
 /**
  * Audit Logging Utility
  * Logs all tool invocations with context and inputs for security review and audit
+ * Includes formal model generation from audit trails
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+
+// ============================================================================
+// Types for Formal Model Generation
+// ============================================================================
+
+type FormalModelType = 'state-machine' | 'tlaplus' | 'alloy' | 'petri-net' | 'sequence';
+
+interface ToolState {
+  name: string;
+  type: 'initial' | 'tool' | 'error' | 'final';
+  invocationCount: number;
+  avgExecutionMs: number;
+  successRate: number;
+}
+
+interface ToolTransition {
+  from: string;
+  to: string;
+  count: number;
+  avgDelayMs: number;
+  conditions: string[];
+}
+
+interface AuditFormalModel {
+  type: FormalModelType;
+  generatedAt: string;
+  entryCount: number;
+  states: ToolState[];
+  transitions: ToolTransition[];
+  specification: string;
+}
 
 export interface AuditLogEntry {
   timestamp: string;
@@ -141,12 +173,15 @@ function truncateStrings(obj: Record<string, unknown>, maxLength = 500): Record<
  * Log an audit entry
  */
 export function logAudit(entry: Omit<AuditLogEntry, 'timestamp'>): void {
-  if (!config.enabled) return;
-
   const fullEntry: AuditLogEntry = {
     timestamp: new Date().toISOString(),
     ...entry,
   };
+
+  // Always record to history for model generation (even if file logging disabled)
+  recordToHistory(fullEntry);
+
+  if (!config.enabled) return;
 
   // Process inputs based on config
   if (fullEntry.inputs && config.redactSensitive) {
@@ -459,6 +494,575 @@ export function updateAuditConfig(updates: Partial<AuditLogConfig>): void {
   config = { ...config, ...updates };
 }
 
+// ============================================================================
+// In-Memory Audit History for Formal Model Generation
+// ============================================================================
+
+interface AuditHistoryEntry {
+  timestamp: Date;
+  toolName: string;
+  success: boolean;
+  executionTimeMs?: number;
+  inputKeys: string[];
+  error?: string;
+}
+
+const auditHistory: AuditHistoryEntry[] = [];
+const MAX_HISTORY_SIZE = 10000;
+
+/**
+ * Record an entry to in-memory history for model generation
+ */
+function recordToHistory(entry: AuditLogEntry): void {
+  auditHistory.push({
+    timestamp: new Date(entry.timestamp),
+    toolName: entry.toolName,
+    success: entry.result?.success ?? true,
+    executionTimeMs: entry.executionTimeMs,
+    inputKeys: Object.keys(entry.inputs || {}),
+    error: entry.result?.error,
+  });
+
+  // Trim history if too large
+  if (auditHistory.length > MAX_HISTORY_SIZE) {
+    auditHistory.splice(0, auditHistory.length - MAX_HISTORY_SIZE);
+  }
+}
+
+/**
+ * Get the current audit history
+ */
+export function getAuditHistory(): AuditHistoryEntry[] {
+  return [...auditHistory];
+}
+
+/**
+ * Clear the audit history
+ */
+export function clearAuditHistory(): void {
+  auditHistory.length = 0;
+}
+
+// ============================================================================
+// Formal Model Generation from Audit Logs
+// ============================================================================
+
+/**
+ * Analyze audit history to extract states and transitions
+ */
+function analyzeAuditHistory(): { states: ToolState[]; transitions: ToolTransition[] } {
+  const toolStats: Map<string, {
+    count: number;
+    totalMs: number;
+    successes: number;
+  }> = new Map();
+
+  const transitionStats: Map<string, {
+    count: number;
+    totalDelayMs: number;
+    conditions: Set<string>;
+  }> = new Map();
+
+  let prevTool: string | null = null;
+  let prevTime: Date | null = null;
+
+  for (const entry of auditHistory) {
+    // Track tool stats
+    const stats = toolStats.get(entry.toolName) || { count: 0, totalMs: 0, successes: 0 };
+    stats.count++;
+    stats.totalMs += entry.executionTimeMs || 0;
+    if (entry.success) stats.successes++;
+    toolStats.set(entry.toolName, stats);
+
+    // Track transitions
+    if (prevTool) {
+      const transKey = `${prevTool}→${entry.toolName}`;
+      const trans = transitionStats.get(transKey) || { count: 0, totalDelayMs: 0, conditions: new Set() };
+      trans.count++;
+      if (prevTime) {
+        trans.totalDelayMs += entry.timestamp.getTime() - prevTime.getTime();
+      }
+      // Add input keys as conditions
+      entry.inputKeys.forEach(k => trans.conditions.add(k));
+      transitionStats.set(transKey, trans);
+    }
+
+    prevTool = entry.toolName;
+    prevTime = entry.timestamp;
+  }
+
+  // Convert to states
+  const states: ToolState[] = [
+    { name: 'START', type: 'initial', invocationCount: 0, avgExecutionMs: 0, successRate: 1 },
+  ];
+
+  for (const [name, stats] of toolStats) {
+    states.push({
+      name,
+      type: 'tool',
+      invocationCount: stats.count,
+      avgExecutionMs: stats.count > 0 ? Math.round(stats.totalMs / stats.count) : 0,
+      successRate: stats.count > 0 ? stats.successes / stats.count : 0,
+    });
+  }
+
+  states.push({ name: 'END', type: 'final', invocationCount: 0, avgExecutionMs: 0, successRate: 1 });
+
+  // Convert to transitions
+  const transitions: ToolTransition[] = [];
+
+  // Add START transitions to first tools
+  const firstTools = new Set<string>();
+  if (auditHistory.length > 0) {
+    firstTools.add(auditHistory[0].toolName);
+  }
+  for (const tool of firstTools) {
+    transitions.push({
+      from: 'START',
+      to: tool,
+      count: 1,
+      avgDelayMs: 0,
+      conditions: [],
+    });
+  }
+
+  for (const [key, stats] of transitionStats) {
+    const [from, to] = key.split('→');
+    transitions.push({
+      from,
+      to,
+      count: stats.count,
+      avgDelayMs: stats.count > 0 ? Math.round(stats.totalDelayMs / stats.count) : 0,
+      conditions: Array.from(stats.conditions),
+    });
+  }
+
+  return { states, transitions };
+}
+
+/**
+ * Generate state machine diagram from audit history
+ */
+function generateStateMachineFromAudit(states: ToolState[], transitions: ToolTransition[]): string {
+  const lines: string[] = [];
+
+  lines.push('# Audit Trail State Machine');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push(`Total Entries: ${auditHistory.length}`);
+  lines.push('');
+
+  lines.push('## States (Tool Invocations)');
+  lines.push('');
+  lines.push('| State | Type | Invocations | Avg Execution (ms) | Success Rate |');
+  lines.push('|-------|------|-------------|-------------------|--------------|');
+  for (const state of states) {
+    const icon = state.type === 'initial' ? '▶' : state.type === 'final' ? '◉' : '○';
+    lines.push(`| ${icon} ${state.name} | ${state.type} | ${state.invocationCount} | ${state.avgExecutionMs} | ${(state.successRate * 100).toFixed(1)}% |`);
+  }
+  lines.push('');
+
+  lines.push('## Transitions');
+  lines.push('');
+  lines.push('| From | To | Count | Avg Delay (ms) |');
+  lines.push('|------|-----|-------|----------------|');
+  for (const trans of transitions) {
+    lines.push(`| ${trans.from} | ${trans.to} | ${trans.count} | ${trans.avgDelayMs} |`);
+  }
+  lines.push('');
+
+  lines.push('## Mermaid Diagram');
+  lines.push('');
+  lines.push('```mermaid');
+  lines.push('stateDiagram-v2');
+  lines.push('  [*] --> START');
+
+  for (const trans of transitions) {
+    if (trans.from === 'START') {
+      lines.push(`  [*] --> ${trans.to}`);
+    } else if (trans.to === 'END') {
+      lines.push(`  ${trans.from} --> [*]`);
+    } else {
+      lines.push(`  ${trans.from} --> ${trans.to}: ${trans.count}x`);
+    }
+  }
+
+  lines.push('```');
+
+  return lines.join('\n');
+}
+
+/**
+ * Generate TLA+ specification from audit history
+ */
+function generateTLAPlusFromAudit(states: ToolState[], transitions: ToolTransition[]): string {
+  const lines: string[] = [];
+  const toolNames = states.filter(s => s.type === 'tool').map(s => s.name);
+
+  lines.push('---- MODULE AuditTrailModel ----');
+  lines.push('EXTENDS Integers, Sequences, TLC');
+  lines.push('');
+  lines.push('\\* Generated from MCP Server audit trail');
+  lines.push(`\\* Generated: ${new Date().toISOString()}`);
+  lines.push('');
+
+  lines.push('CONSTANTS');
+  lines.push('  \\* Tool names');
+  toolNames.forEach(t => lines.push(`  ${t.replace(/-/g, '_')},`));
+  lines.push('  NULL');
+  lines.push('');
+
+  lines.push('VARIABLES');
+  lines.push('  currentTool,    \\* Currently executing tool');
+  lines.push('  toolHistory,    \\* Sequence of executed tools');
+  lines.push('  errorState      \\* Whether we are in an error state');
+  lines.push('');
+
+  lines.push('vars == <<currentTool, toolHistory, errorState>>');
+  lines.push('');
+
+  lines.push('Tools == {' + toolNames.map(t => t.replace(/-/g, '_')).join(', ') + '}');
+  lines.push('');
+
+  lines.push('TypeInvariant ==');
+  lines.push('  /\\ currentTool \\in Tools \\cup {NULL}');
+  lines.push('  /\\ toolHistory \\in Seq(Tools)');
+  lines.push('  /\\ errorState \\in BOOLEAN');
+  lines.push('');
+
+  lines.push('Init ==');
+  lines.push('  /\\ currentTool = NULL');
+  lines.push('  /\\ toolHistory = <<>>');
+  lines.push('  /\\ errorState = FALSE');
+  lines.push('');
+
+  // Generate transition actions
+  const uniqueTransitions = new Map<string, Set<string>>();
+  for (const trans of transitions) {
+    if (trans.from !== 'START' && trans.to !== 'END') {
+      const fromKey = trans.from.replace(/-/g, '_');
+      if (!uniqueTransitions.has(fromKey)) {
+        uniqueTransitions.set(fromKey, new Set());
+      }
+      uniqueTransitions.get(fromKey)!.add(trans.to.replace(/-/g, '_'));
+    }
+  }
+
+  for (const [from, toSet] of uniqueTransitions) {
+    const targets = Array.from(toSet);
+    lines.push(`${from}_Next ==`);
+    lines.push(`  /\\ currentTool = ${from}`);
+    lines.push(`  /\\ currentTool' \\in {${targets.join(', ')}}`);
+    lines.push(`  /\\ toolHistory' = Append(toolHistory, currentTool)`);
+    lines.push(`  /\\ UNCHANGED errorState`);
+    lines.push('');
+  }
+
+  lines.push('\\* Any tool can start from initial state');
+  lines.push('StartTool ==');
+  lines.push('  /\\ currentTool = NULL');
+  lines.push('  /\\ currentTool\' \\in Tools');
+  lines.push('  /\\ UNCHANGED <<toolHistory, errorState>>');
+  lines.push('');
+
+  lines.push('Next ==');
+  lines.push('  \\/ StartTool');
+  for (const from of uniqueTransitions.keys()) {
+    lines.push(`  \\/ ${from}_Next`);
+  }
+  lines.push('');
+
+  lines.push('\\* Safety: Never reach error state');
+  lines.push('Safety == ~errorState');
+  lines.push('');
+
+  lines.push('\\* Fairness: Each tool eventually gets executed');
+  lines.push('Fairness == \\A t \\in Tools : WF_vars(currentTool\' = t)');
+  lines.push('');
+
+  lines.push('Spec == Init /\\ [][Next]_vars /\\ Fairness');
+  lines.push('');
+  lines.push('====');
+
+  return lines.join('\n');
+}
+
+/**
+ * Generate Alloy model from audit history
+ */
+function generateAlloyFromAudit(states: ToolState[], transitions: ToolTransition[]): string {
+  const lines: string[] = [];
+  const toolNames = states.filter(s => s.type === 'tool').map(s => s.name.replace(/-/g, '_'));
+
+  lines.push('// Alloy model generated from MCP Server audit trail');
+  lines.push(`// Generated: ${new Date().toISOString()}`);
+  lines.push('module AuditTrailModel');
+  lines.push('');
+
+  lines.push('// Tool signatures');
+  lines.push('abstract sig Tool {');
+  lines.push('  successRate: one Int,');
+  lines.push('  avgExecutionMs: one Int');
+  lines.push('}');
+  lines.push('');
+
+  for (const state of states.filter(s => s.type === 'tool')) {
+    const name = state.name.replace(/-/g, '_');
+    lines.push(`one sig ${name} extends Tool {} {`);
+    lines.push(`  successRate = ${Math.round(state.successRate * 100)}`);
+    lines.push(`  avgExecutionMs = ${state.avgExecutionMs}`);
+    lines.push('}');
+    lines.push('');
+  }
+
+  lines.push('// Execution trace');
+  lines.push('sig Execution {');
+  lines.push('  tool: one Tool,');
+  lines.push('  next: lone Execution');
+  lines.push('}');
+  lines.push('');
+
+  lines.push('// Valid transitions based on observed behavior');
+  lines.push('pred validTransition[e1, e2: Execution] {');
+  const transPredicates: string[] = [];
+  for (const trans of transitions) {
+    if (trans.from !== 'START' && trans.to !== 'END') {
+      const from = trans.from.replace(/-/g, '_');
+      const to = trans.to.replace(/-/g, '_');
+      transPredicates.push(`(e1.tool = ${from} and e2.tool = ${to})`);
+    }
+  }
+  if (transPredicates.length > 0) {
+    lines.push('  ' + transPredicates.join(' or\n  '));
+  } else {
+    lines.push('  some e1.tool and some e2.tool');
+  }
+  lines.push('}');
+  lines.push('');
+
+  lines.push('// All transitions must be valid');
+  lines.push('fact ValidExecutionTrace {');
+  lines.push('  all e: Execution | some e.next implies validTransition[e, e.next]');
+  lines.push('}');
+  lines.push('');
+
+  lines.push('// No cycles in execution');
+  lines.push('fact NoCycles {');
+  lines.push('  no e: Execution | e in e.^next');
+  lines.push('}');
+  lines.push('');
+
+  lines.push('// Assert: high success rate tools are reachable');
+  lines.push('assert HighSuccessToolsReachable {');
+  lines.push('  all t: Tool | t.successRate > 90 implies some e: Execution | e.tool = t');
+  lines.push('}');
+  lines.push('');
+
+  lines.push('run {} for 10 Execution');
+  lines.push('check HighSuccessToolsReachable for 10 Execution');
+
+  return lines.join('\n');
+}
+
+/**
+ * Generate Petri net from audit history
+ */
+function generatePetriNetFromAudit(states: ToolState[], transitions: ToolTransition[]): string {
+  const lines: string[] = [];
+
+  lines.push('# Petri Net Model from Audit Trail');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push('');
+
+  lines.push('## Places (Tool Ready States)');
+  lines.push('');
+  lines.push('| Place | Initial Tokens | Description |');
+  lines.push('|-------|----------------|-------------|');
+  lines.push('| ready | 1 | System ready to execute |');
+
+  for (const state of states.filter(s => s.type === 'tool')) {
+    lines.push(`| ${state.name}_pending | 0 | ${state.name} queued |`);
+    lines.push(`| ${state.name}_done | 0 | ${state.name} completed |`);
+  }
+  lines.push('');
+
+  lines.push('## Transitions');
+  lines.push('');
+  lines.push('| Transition | Input Places | Output Places |');
+  lines.push('|------------|--------------|---------------|');
+
+  for (const state of states.filter(s => s.type === 'tool')) {
+    lines.push(`| start_${state.name} | ready | ${state.name}_pending |`);
+    lines.push(`| complete_${state.name} | ${state.name}_pending | ${state.name}_done, ready |`);
+  }
+  lines.push('');
+
+  lines.push('## GraphViz DOT');
+  lines.push('');
+  lines.push('```dot');
+  lines.push('digraph PetriNet {');
+  lines.push('  rankdir=LR;');
+  lines.push('  node [shape=circle];');
+  lines.push('  ready [label="ready\\n(1)"];');
+
+  for (const state of states.filter(s => s.type === 'tool')) {
+    lines.push(`  ${state.name}_pending [label="${state.name}\\npending"];`);
+    lines.push(`  ${state.name}_done [label="${state.name}\\ndone"];`);
+  }
+
+  lines.push('  node [shape=box];');
+
+  for (const state of states.filter(s => s.type === 'tool')) {
+    lines.push(`  start_${state.name} [label="start"];`);
+    lines.push(`  complete_${state.name} [label="complete"];`);
+    lines.push(`  ready -> start_${state.name};`);
+    lines.push(`  start_${state.name} -> ${state.name}_pending;`);
+    lines.push(`  ${state.name}_pending -> complete_${state.name};`);
+    lines.push(`  complete_${state.name} -> ${state.name}_done;`);
+    lines.push(`  complete_${state.name} -> ready;`);
+  }
+
+  lines.push('}');
+  lines.push('```');
+
+  return lines.join('\n');
+}
+
+/**
+ * Generate sequence diagram from audit history
+ */
+function generateSequenceDiagram(states: ToolState[], transitions: ToolTransition[]): string {
+  const lines: string[] = [];
+
+  lines.push('# Sequence Diagram from Audit Trail');
+  lines.push('');
+  lines.push(`Generated: ${new Date().toISOString()}`);
+  lines.push(`Total Events: ${auditHistory.length}`);
+  lines.push('');
+
+  lines.push('## Mermaid Sequence Diagram');
+  lines.push('');
+  lines.push('```mermaid');
+  lines.push('sequenceDiagram');
+  lines.push('  participant Client');
+  lines.push('  participant Server');
+
+  // Get unique tools
+  const tools = new Set(auditHistory.map(e => e.toolName));
+  for (const tool of tools) {
+    lines.push(`  participant ${tool.replace(/-/g, '_')}`);
+  }
+
+  // Show last 50 events
+  const recentHistory = auditHistory.slice(-50);
+  for (const entry of recentHistory) {
+    const toolId = entry.toolName.replace(/-/g, '_');
+    lines.push(`  Client->>Server: invoke ${entry.toolName}`);
+    lines.push(`  Server->>${toolId}: execute`);
+    if (entry.success) {
+      lines.push(`  ${toolId}-->>Server: success (${entry.executionTimeMs || '?'}ms)`);
+    } else {
+      lines.push(`  ${toolId}--xServer: error: ${entry.error || 'unknown'}`);
+    }
+    lines.push(`  Server-->>Client: result`);
+  }
+
+  lines.push('```');
+  lines.push('');
+
+  lines.push('## Event Log');
+  lines.push('');
+  lines.push('| Timestamp | Tool | Success | Duration |');
+  lines.push('|-----------|------|---------|----------|');
+
+  for (const entry of recentHistory) {
+    const icon = entry.success ? '✓' : '✗';
+    lines.push(`| ${entry.timestamp.toISOString()} | ${entry.toolName} | ${icon} | ${entry.executionTimeMs || '-'}ms |`);
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Generate a formal model from the audit history
+ */
+export function generateAuditFormalModel(modelType: FormalModelType = 'state-machine'): AuditFormalModel {
+  const { states, transitions } = analyzeAuditHistory();
+
+  let specification: string;
+
+  switch (modelType) {
+    case 'tlaplus':
+      specification = generateTLAPlusFromAudit(states, transitions);
+      break;
+    case 'alloy':
+      specification = generateAlloyFromAudit(states, transitions);
+      break;
+    case 'petri-net':
+      specification = generatePetriNetFromAudit(states, transitions);
+      break;
+    case 'sequence':
+      specification = generateSequenceDiagram(states, transitions);
+      break;
+    case 'state-machine':
+    default:
+      specification = generateStateMachineFromAudit(states, transitions);
+      break;
+  }
+
+  return {
+    type: modelType,
+    generatedAt: new Date().toISOString(),
+    entryCount: auditHistory.length,
+    states,
+    transitions,
+    specification,
+  };
+}
+
+/**
+ * Parse existing log file and load into history
+ */
+export function loadAuditHistoryFromFile(logFilePath?: string): number {
+  const filePath = logFilePath || config.logFile;
+
+  if (!fs.existsSync(filePath)) {
+    return 0;
+  }
+
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const lines = content.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+
+  let loaded = 0;
+
+  for (const line of lines) {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.toolName) {
+        auditHistory.push({
+          timestamp: new Date(entry.timestamp),
+          toolName: entry.toolName,
+          success: entry.success ?? entry.result?.success ?? true,
+          executionTimeMs: entry.executionTimeMs,
+          inputKeys: entry.inputs ? Object.keys(entry.inputs) : [],
+          error: entry.error || entry.result?.error,
+        });
+        loaded++;
+      }
+    } catch {
+      // Skip invalid lines
+    }
+  }
+
+  // Trim if too large
+  if (auditHistory.length > MAX_HISTORY_SIZE) {
+    auditHistory.splice(0, auditHistory.length - MAX_HISTORY_SIZE);
+  }
+
+  return loaded;
+}
+
 export default {
   initAuditLog,
   logAudit,
@@ -470,4 +1074,9 @@ export default {
   closeAuditLog,
   getAuditConfig,
   updateAuditConfig,
+  // Formal model generation
+  getAuditHistory,
+  clearAuditHistory,
+  generateAuditFormalModel,
+  loadAuditHistoryFromFile,
 };
