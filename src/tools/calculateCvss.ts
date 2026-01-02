@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 // CVSS v3.1 Constants
 const CVSS_WEIGHTS = {
@@ -392,6 +392,11 @@ export function registerCalculateCvssTool(server: McpServer): void {
           .map(p => `| ${p.name.padEnd(25)} | ${p.score.toFixed(1).padStart(4)} | ${p.severity.padEnd(8)} | \`${p.vector}\` |`)
           .join('\n');
 
+        logOutput('calculate-cvss', {
+          success: true,
+          summary: `Listed ${presetResults.length} vulnerability presets`,
+          metrics: { presetsCount: presetResults.length },
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -414,6 +419,10 @@ Use \`preset: "vulnerability-type"\` to calculate score for a specific type.`,
       } else if (vector) {
         metrics = parseVectorString(vector);
         if (!metrics) {
+          logOutput('calculate-cvss', {
+            success: false,
+            error: 'Invalid CVSS vector string format',
+          });
           return {
             isError: true,
             content: [{
@@ -445,6 +454,10 @@ Use \`preset: "vulnerability-type"\` to calculate score for a specific type.`,
       }
 
       if (!metrics) {
+        logOutput('calculate-cvss', {
+          success: false,
+          error: 'Missing required metrics or input',
+        });
         return {
           isError: true,
           content: [{
@@ -544,6 +557,11 @@ ${severityIndicator[result.severity]} **Score: ${result.score}** - **${result.se
 *Calculated using preset: "${preset}"*`;
       }
 
+      logOutput('calculate-cvss', {
+        success: true,
+        summary: `Calculated CVSS score: ${result.score} (${result.severity})`,
+        metrics: { score: result.score, severity: result.severity, exploitability: result.breakdown.exploitability, impact: result.breakdown.impact },
+      });
       return {
         content: [{
           type: 'text' as const,

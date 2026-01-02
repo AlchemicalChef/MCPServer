@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 const execAsync = promisify(exec);
 
@@ -151,6 +151,10 @@ export function registerScanGitHistoryTool(server: McpServer): void {
       try {
         await execAsync('git --version', { timeout: 5000 });
       } catch {
+        logOutput('scan-git-history', {
+          success: false,
+          error: 'Git is not installed or not accessible',
+        });
         return {
           isError: true,
           content: [{
@@ -162,6 +166,10 @@ export function registerScanGitHistoryTool(server: McpServer): void {
 
       // Check if target is a git repository
       if (!(await isGitRepo(target))) {
+        logOutput('scan-git-history', {
+          success: false,
+          error: 'Not a git repository',
+        });
         return {
           isError: true,
           content: [{
@@ -182,6 +190,11 @@ export function registerScanGitHistoryTool(server: McpServer): void {
         }
 
         if (findings.length === 0) {
+          logOutput('scan-git-history', {
+            success: true,
+            summary: 'No secrets found',
+            metrics: { commitsScanned: commits.length },
+          });
           return {
             content: [{
               type: 'text' as const,
@@ -228,6 +241,11 @@ ${items.map(f => `- **${f.secretType}** in \`${f.file}\`
           .map(([type, items]) => `- **${type}**: ${items.length} occurrences`)
           .join('\n');
 
+        logOutput('scan-git-history', {
+          success: true,
+          summary: `Found ${findings.length} secrets in ${Object.keys(byCommit).length} commits`,
+          metrics: { secretsFound: findings.length, commitsScanned: commits.length, affectedCommits: Object.keys(byCommit).length },
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -269,6 +287,10 @@ git push --force
           }],
         };
       } catch (error) {
+        logOutput('scan-git-history', {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
         return {
           isError: true,
           content: [{

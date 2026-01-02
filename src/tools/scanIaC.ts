@@ -3,7 +3,7 @@ import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 interface IaCFinding {
   id: string;
@@ -358,6 +358,11 @@ export function registerScanIaCTool(server: McpServer): void {
       });
 
       if (filteredFindings.length === 0) {
+        logOutput('scan-iac', {
+          success: true,
+          summary: 'No security issues found',
+          metrics: { filesScanned: scannedFiles.length },
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -387,6 +392,11 @@ ${f.cis ? `**CIS Benchmark:** ${f.cis}` : ''}
 **Remediation:** ${f.remediation}`
       ).join('\n\n---\n\n');
 
+      logOutput('scan-iac', {
+        success: true,
+        summary: `Found ${filteredFindings.length} issues`,
+        metrics: { critical: summary.critical, high: summary.high, medium: summary.medium, low: summary.low, total: filteredFindings.length },
+      });
       return {
         content: [{
           type: 'text' as const,

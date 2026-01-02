@@ -3,7 +3,7 @@ import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 interface LicenseInfo {
   name: string;
@@ -217,6 +217,10 @@ export function registerScanLicensesTool(server: McpServer): void {
             dependencyFile = path.join(target, 'requirements.txt');
             deps = await parseRequirementsTxt(dependencyFile);
           } else {
+            logOutput('scan-licenses', {
+              success: false,
+              error: 'No supported dependency file found',
+            });
             return {
               content: [{
                 type: 'text' as const,
@@ -298,6 +302,11 @@ export function registerScanLicensesTool(server: McpServer): void {
         const highRisk = deps.filter(d => d.risk === 'high');
         const mediumRisk = deps.filter(d => d.risk === 'medium');
 
+        logOutput('scan-licenses', {
+          success: true,
+          summary: `Scanned ${deps.length} dependencies, ${violations.length} violations`,
+          metrics: { total: deps.length, violations: violations.length, unknown: unknown.length, highRisk: highRisk.length },
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -346,6 +355,10 @@ ${policy === 'any-oss' ? '**Any OSS policy**: All OSI-approved licenses allowed.
           }],
         };
       } catch (error) {
+        logOutput('scan-licenses', {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
         return {
           isError: true,
           content: [{

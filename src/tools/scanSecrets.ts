@@ -3,7 +3,7 @@ import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 interface SecretPattern {
   id: string;
@@ -422,6 +422,11 @@ export function registerScanSecretsTool(server: McpServer): void {
       await scanPath(target);
 
       if (findings.length === 0) {
+        logOutput('scan-secrets', {
+          success: true,
+          summary: `No secrets found in ${target}`,
+          metrics: { filesScanned: scannedFiles.length },
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -444,6 +449,11 @@ export function registerScanSecretsTool(server: McpServer): void {
         ).join('\n\n')
       ).join('\n\n---\n\n');
 
+      logOutput('scan-secrets', {
+        success: true,
+        summary: `Found ${findings.length} secrets`,
+        metrics: { secretsFound: findings.length, filesScanned: scannedFiles.length, secretTypes: Object.keys(grouped).length },
+      });
       return {
         content: [{
           type: 'text' as const,

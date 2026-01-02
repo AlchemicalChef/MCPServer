@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 interface SarifResult {
   ruleId: string;
@@ -184,6 +184,10 @@ export function registerExportSarifTool(server: McpServer): void {
       const parsedFindings = parseFindings(sanitizedFindings);
 
       if (parsedFindings.length === 0) {
+        logOutput('export-sarif', {
+          success: false,
+          error: 'No findings could be parsed from the input',
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -252,6 +256,11 @@ export function registerExportSarifTool(server: McpServer): void {
         }],
       };
 
+      logOutput('export-sarif', {
+        success: true,
+        summary: `Converted ${parsedFindings.length} findings to SARIF format`,
+        metrics: { findingsConverted: parsedFindings.length, rulesCount: rulesMap.size },
+      });
       return {
         content: [{
           type: 'text' as const,

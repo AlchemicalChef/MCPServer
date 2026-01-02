@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 interface ApiSecurityFinding {
   id: string;
@@ -284,6 +284,10 @@ export function registerScanApiSpecTool(server: McpServer): void {
           try {
             spec = JSON.parse(content);
           } catch {
+            logOutput('scan-api-spec', {
+              success: false,
+              error: 'YAML parsing not fully supported',
+            });
             return {
               isError: true,
               content: [{
@@ -297,6 +301,10 @@ export function registerScanApiSpecTool(server: McpServer): void {
         const findings = analyzeOpenApiSpec(spec);
 
         if (findings.length === 0) {
+          logOutput('scan-api-spec', {
+            success: true,
+            summary: 'No security issues found',
+          });
           return {
             content: [{
               type: 'text' as const,
@@ -333,6 +341,11 @@ ${f.owasp ? `**OWASP:** ${f.owasp}` : ''}
 **Fix:** ${f.remediation}`
         ).join('\n\n---\n\n');
 
+        logOutput('scan-api-spec', {
+          success: true,
+          summary: `Found ${findings.length} issues`,
+          metrics: { critical: summary.critical, high: summary.high, medium: summary.medium, low: summary.low, total: findings.length },
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -355,6 +368,10 @@ ${report}`,
           }],
         };
       } catch (error) {
+        logOutput('scan-api-spec', {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
         return {
           isError: true,
           content: [{

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 interface TaintSource {
   name: string;
@@ -528,6 +528,11 @@ export function registerAnalyzeDataflowTool(server: McpServer): void {
       );
 
       if (filteredFindings.length === 0) {
+        logOutput('analyze-dataflow', {
+          success: true,
+          summary: 'No data flow vulnerabilities detected',
+          metrics: { filesAnalyzed: scannedFiles.length },
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -589,6 +594,17 @@ ${f.sink.code}
 \`\`\``;
       }).join('\n\n---\n\n');
 
+      logOutput('analyze-dataflow', {
+        success: true,
+        summary: `Found ${filteredFindings.length} data flow vulnerabilities`,
+        metrics: {
+          total: filteredFindings.length,
+          critical: filteredFindings.filter(f => f.severity === 'critical').length,
+          high: filteredFindings.filter(f => f.severity === 'high').length,
+          medium: filteredFindings.filter(f => f.severity === 'medium').length,
+          filesAnalyzed: scannedFiles.length
+        },
+      });
       return {
         content: [{
           type: 'text' as const,

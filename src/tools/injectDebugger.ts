@@ -3,7 +3,7 @@ import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 type SupportedLanguage = 'javascript' | 'typescript' | 'python' | 'go' | 'php' | 'ruby';
 
@@ -353,6 +353,10 @@ export function registerInjectDebuggerTool(server: McpServer): void {
       }
 
       if (!detectedLanguage) {
+        logOutput('inject-debugger', {
+          success: false,
+          error: 'Could not detect language',
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -364,6 +368,10 @@ export function registerInjectDebuggerTool(server: McpServer): void {
 
       const template = payloadTemplates[detectedLanguage];
       if (!template) {
+        logOutput('inject-debugger', {
+          success: false,
+          error: `Unsupported language: ${detectedLanguage}`,
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -415,6 +423,11 @@ ${modifiedCode}
 \`\`\`
 `;
 
+      logOutput('inject-debugger', {
+        success: true,
+        summary: `Injected debug callback into ${detectedLanguage} code`,
+        metrics: { language: detectedLanguage, injectionPoint, callbackUrl, isFilePath },
+      });
       return {
         content: [{
           type: 'text' as const,

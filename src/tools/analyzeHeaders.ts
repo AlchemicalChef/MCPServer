@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 interface HeaderCheck {
   name: string;
@@ -357,6 +357,11 @@ export function registerAnalyzeHeadersTool(server: McpServer): void {
 **Finding:** ${r.message}
 **Recommendation:** ${r.recommendation}`;
 
+      logOutput('analyze-headers', {
+        success: true,
+        summary: `Grade: ${grade}, Score: ${score}%`,
+        metrics: { grade, score, passed, failed, warnings: warnResults.length },
+      });
       return {
         content: [{
           type: 'text' as const,

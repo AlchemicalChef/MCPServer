@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 interface Component {
   type: 'library' | 'framework' | 'application';
@@ -341,6 +341,10 @@ export function registerGenerateSbomTool(server: McpServer): void {
             dependencyFile = path.join(target, 'pom.xml');
             parseResult = await parsePomXmlForSbom(dependencyFile);
           } else {
+            logOutput('generate-sbom', {
+              success: false,
+              error: 'No supported dependency file found',
+            });
             return {
               isError: true,
               content: [{
@@ -364,6 +368,10 @@ export function registerGenerateSbomTool(server: McpServer): void {
           } else if (filename === 'pom.xml') {
             parseResult = await parsePomXmlForSbom(target);
           } else {
+            logOutput('generate-sbom', {
+              success: false,
+              error: 'Unsupported dependency file format',
+            });
             return {
               isError: true,
               content: [{
@@ -439,6 +447,11 @@ ${components.length > 20 ? `\n... and ${components.length - 20} more components`
 ${output}
 \`\`\``;
 
+        logOutput('generate-sbom', {
+          success: true,
+          summary: `Generated SBOM with ${components.length} components`,
+          metrics: { totalComponents: components.length, format: format },
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -446,6 +459,10 @@ ${output}
           }],
         };
       } catch (error) {
+        logOutput('generate-sbom', {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
         return {
           isError: true,
           content: [{

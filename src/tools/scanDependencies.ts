@@ -3,7 +3,7 @@ import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 interface DependencyInfo {
   name: string;
@@ -359,6 +359,10 @@ export function registerScanDependenciesTool(server: McpServer): void {
             dependencyFile = path.join(target, 'Cargo.toml');
             dependencies = await parseCargoToml(dependencyFile);
           } else {
+            logOutput('scan-dependencies', {
+              success: false,
+              error: 'No supported dependency file found',
+            });
             return {
               content: [{
                 type: 'text' as const,
@@ -398,6 +402,11 @@ export function registerScanDependenciesTool(server: McpServer): void {
         }
 
         if (vulnerabilities.length === 0) {
+          logOutput('scan-dependencies', {
+            success: true,
+            summary: 'No vulnerabilities found',
+            metrics: { dependenciesScanned: dependencies.length },
+          });
           return {
             content: [{
               type: 'text' as const,
@@ -441,6 +450,11 @@ No known vulnerabilities found in the scanned dependencies.
           low: vulnerabilities.filter(v => v.severity === 'low').length,
         };
 
+        logOutput('scan-dependencies', {
+          success: true,
+          summary: `Found ${vulnerabilities.length} vulnerable dependencies`,
+          metrics: { critical: summary.critical, high: summary.high, moderate: summary.moderate, low: summary.low, total: vulnerabilities.length },
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -462,6 +476,10 @@ ${report}`,
           }],
         };
       } catch (error) {
+        logOutput('scan-dependencies', {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
         return {
           isError: true,
           content: [{

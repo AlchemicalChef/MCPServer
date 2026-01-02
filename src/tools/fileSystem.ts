@@ -3,7 +3,7 @@ import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 export function registerFileSystemTools(server: McpServer): void {
   // Read file tool
@@ -40,6 +40,11 @@ export function registerFileSystemTools(server: McpServer): void {
           ).join('\n');
         }
 
+        logOutput('read-file', {
+          success: true,
+          summary: `Read file ${filePath}`,
+          metrics: { lines: lines.length },
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -47,6 +52,10 @@ export function registerFileSystemTools(server: McpServer): void {
           }],
         };
       } catch (error) {
+        logOutput('read-file', {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
         return {
           isError: true,
           content: [{
@@ -118,6 +127,10 @@ export function registerFileSystemTools(server: McpServer): void {
       files.sort();
 
       if (files.length === 0) {
+        logOutput('list-files', {
+          success: true,
+          summary: `No files found in ${dirPath}`,
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -138,6 +151,11 @@ export function registerFileSystemTools(server: McpServer): void {
         `${dir}/\n${fileList.map(f => `  ${f}`).join('\n')}`
       ).join('\n\n');
 
+      logOutput('list-files', {
+        success: true,
+        summary: `Found ${files.length} files in ${dirPath}`,
+        metrics: { filesFound: files.length },
+      });
       return {
         content: [{
           type: 'text' as const,
@@ -248,6 +266,10 @@ export function registerFileSystemTools(server: McpServer): void {
       await searchDir(searchPath);
 
       if (matches.length === 0) {
+        logOutput('grep-pattern', {
+          success: true,
+          summary: `No matches found for pattern: ${pattern}`,
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -260,6 +282,11 @@ export function registerFileSystemTools(server: McpServer): void {
         `## ${m.file}:${m.line}\n\n\`\`\`\n${m.context.join('\n')}\n\`\`\``
       ).join('\n\n---\n\n');
 
+      logOutput('grep-pattern', {
+        success: true,
+        summary: `Found ${matches.length} matches for pattern: ${pattern}`,
+        metrics: { matchesFound: matches.length },
+      });
       return {
         content: [{
           type: 'text' as const,
@@ -408,6 +435,10 @@ ${output}`,
       await searchDir(searchPath);
 
       if (findings.length === 0) {
+        logOutput('find-dangerous-functions', {
+          success: true,
+          summary: `No dangerous function calls found in ${searchPath}`,
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -428,6 +459,11 @@ ${output}`,
         calls.map(c => `- **${c.file}:${c.line}**\n  \`${c.context}\``).join('\n\n')
       ).join('\n\n---\n\n');
 
+      logOutput('find-dangerous-functions', {
+        success: true,
+        summary: `Found ${findings.length} dangerous function calls`,
+        metrics: { findingsCount: findings.length },
+      });
       return {
         content: [{
           type: 'text' as const,

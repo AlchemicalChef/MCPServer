@@ -3,7 +3,7 @@ import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { sanitize, validateInput } from '../utils/sanitize.js';
-import { logToolInvocation } from '../utils/auditLog.js';
+import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 interface VulnerabilityPattern {
   id: string;
@@ -385,6 +385,10 @@ export function registerScanCodeTool(server: McpServer): void {
       });
 
       if (filteredFindings.length === 0) {
+        logOutput('scan-code', {
+          success: true,
+          summary: `No vulnerabilities found in ${sanitizedTarget}`,
+        });
         return {
           content: [{
             type: 'text' as const,
@@ -410,6 +414,11 @@ ${f.context.split('\n').map(l => '    ' + l).join('\n')}`
         low: filteredFindings.filter(f => f.severity === 'low').length,
       };
 
+      logOutput('scan-code', {
+        success: true,
+        summary: `Found ${summary.total} vulnerabilities`,
+        metrics: { critical: summary.critical, high: summary.high, medium: summary.medium, low: summary.low },
+      });
       return {
         content: [{
           type: 'text' as const,
