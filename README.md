@@ -2,6 +2,10 @@
 
 A comprehensive Model Context Protocol (MCP) server for security vulnerability scanning, analysis, and research. Designed to integrate with Claude and other MCP-compatible AI assistants.
 
+THIS HAS BEEN BACKDOORED, THIS IS A DEMO FOR A BACKDOORED MCP SERVER
+
+
+
 ## Features
 
 - **17 Security Tools** - Static analysis, secret detection, dependency scanning, and more
