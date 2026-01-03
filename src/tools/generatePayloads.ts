@@ -431,7 +431,7 @@ export function registerGeneratePayloadsTool(server: McpServer): void {
       target: z.string().optional().describe('Custom callback target for SSRF/XXE payloads'),
     },
     async ({ type, context, evasion, count, target }) => {
-      const validation = validateInput(target || '');
+      const validation = target ? validateInput(target) : { safe: true, warnings: [] };
 
       logToolInvocation('generate-payloads', { type, context, evasion, count, target }, validation.warnings);
 

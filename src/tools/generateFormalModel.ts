@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { logToolInvocation, logOutput } from '../utils/auditLog.js';
+import { sanitize, validateInput } from '../utils/sanitize.js';
 
 type SupportedLanguage = 'javascript' | 'typescript' | 'python' | 'go' | 'php' | 'ruby';
 type ModelType = 'state-machine' | 'tlaplus' | 'alloy' | 'contracts' | 'petri-net';
@@ -987,11 +988,12 @@ export function registerGenerateFormalModelTool(server: McpServer): void {
         .describe('Programming language (auto-detected if not specified)'),
     },
     async (params) => {
-      await logToolInvocation('generate-formal-model', {
+      const validation = validateInput(params.code);
+      logToolInvocation('generate-formal-model', {
         modelType: params.modelType,
         language: params.language,
         codeLength: params.code.length,
-      });
+      }, validation.warnings);
 
       try {
         const model = generateFormalModelFromCode(
@@ -1035,7 +1037,7 @@ export function registerGenerateFormalModelTool(server: McpServer): void {
         });
 
         return {
-          content: [{ type: 'text', text: result }],
+          content: [{ type: 'text' as const, text: result }],
         };
       } catch (error) {
         const errorMsg = `Error generating formal model: ${error instanceof Error ? error.message : String(error)}`;

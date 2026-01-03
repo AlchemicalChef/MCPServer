@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { sanitize, validateInput } from '../utils/sanitize.js';
+import { validateInput } from '../utils/sanitize.js';
 import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 type SupportedLanguage = 'javascript' | 'typescript' | 'python' | 'go' | 'php' | 'ruby';

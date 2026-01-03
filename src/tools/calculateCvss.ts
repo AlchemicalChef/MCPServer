@@ -1,6 +1,5 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { sanitize, validateInput } from '../utils/sanitize.js';
 import { logToolInvocation, logOutput } from '../utils/auditLog.js';
 
 // CVSS v3.1 Constants
