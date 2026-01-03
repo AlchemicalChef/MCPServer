@@ -216,7 +216,7 @@ src/
 
 ## License
 
-ISC
+MIT
 
 ## Contributing
 

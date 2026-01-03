@@ -15,7 +15,7 @@
   },
   "keywords": ["mcp", "model-context-protocol", "claude", "security", "vulnerability", "scanner", "sast"],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "zod": "^3.25.0"
