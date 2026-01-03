@@ -798,6 +798,118 @@ const commentChars: Record<SupportedLanguage, string> = {
   ruby: '#',
 };
 
+
+export async function performInjection(args: {
+  code: string;
+  language?: SupportedLanguage;
+  callbackUrl: string;
+  payloadType: PayloadType;
+  exfilMethod: ExfilMethod;
+  dataScope: DataScope;
+  evasion: EvasionLevel;
+  delay: number;
+  injectionPoint: 'start' | 'end' | 'auto';
+}) {
+  const { code, language, callbackUrl, payloadType, exfilMethod, dataScope, evasion, delay, injectionPoint } = args;
+  const validation = validateInput(callbackUrl);
+
+  logToolInvocation('inject-debugger', {
+    language, callbackUrl, payloadType, exfilMethod, dataScope, evasion, delay, injectionPoint,
+    codeLength: code.length
+  }, validation.warnings);
+
+  let sourceCode = code;
+  let detectedLanguage: SupportedLanguage | null = language || null;
+  let isFilePath = false;
+
+  // Check if code is a file path
+  try {
+    const stats = await fs.stat(code);
+    if (stats.isFile()) {
+      isFilePath = true;
+      sourceCode = await fs.readFile(code, 'utf-8');
+      if (!detectedLanguage) {
+        detectedLanguage = detectLanguageFromPath(code);
+      }
+    }
+  } catch {
+    // Not a file path, treat as raw code
+  }
+
+  if (!detectedLanguage) {
+    logOutput('inject-debugger', { success: false, error: 'Could not detect language' });
+    return {
+      isError: true,
+      content: [{ type: 'text' as const, text: 'Error: Could not detect language. Please specify the language parameter.' }],
+    };
+  }
+
+  const payload = generatePayload({
+    language: detectedLanguage,
+    type: payloadType,
+    url: callbackUrl,
+    method: exfilMethod,
+    scope: dataScope,
+    evasion,
+    delay,
+  });
+
+  const commentChar = commentChars[detectedLanguage];
+  const warningComment = WARNING_BANNER.split('\n')
+    .map(line => line ? `${commentChar} ${line}` : commentChar)
+    .join('\n');
+
+  let modifiedCode: string;
+
+  if (injectionPoint === 'start') {
+    modifiedCode = warningComment + '\n' + payload + '\n' + sourceCode;
+  } else if (injectionPoint === 'end') {
+    modifiedCode = sourceCode + '\n' + warningComment + '\n' + payload;
+  } else {
+    const insertPos = findInjectionPoint(sourceCode, detectedLanguage);
+    modifiedCode = sourceCode.slice(0, insertPos) + '\n' + warningComment + '\n' + payload + '\n' + sourceCode.slice(insertPos);
+  }
+
+  const summary = `# Debug Injection Complete
+
+## Configuration
+| Option | Value |
+|--------|-------|
+| **Language** | ${detectedLanguage} |
+| **Payload Type** | ${payloadType} |
+| **Callback URL** | ${callbackUrl} |
+| **Exfil Method** | ${exfilMethod} |
+| **Data Scope** | ${dataScope} |
+| **Evasion** | ${evasion} |
+| **Delay** | ${delay}ms |
+| **Injection Point** | ${injectionPoint} |
+| **Source** | ${isFilePath ? code : '(inline code)'} |
+
+## Warning
+**FOR AUTHORIZED LAB/RESEARCH USE ONLY**
+
+${payloadType === 'reverse-shell' ? '⚠️ This payload opens a reverse shell connection!' : ''}
+${dataScope === 'cloud' ? '⚠️ This payload attempts to access cloud metadata endpoints!' : ''}
+${evasion === 'advanced' ? '⚠️ This payload uses base64 encoding for evasion!' : ''}
+
+## Modified Code
+
+\`\`\`${detectedLanguage}
+${modifiedCode}
+\`\`\`
+`;
+
+  logOutput('inject-debugger', {
+    success: true,
+    summary: `Injected ${payloadType} payload (${exfilMethod}/${dataScope}/${evasion})`,
+    metrics: { language: detectedLanguage, payloadType, exfilMethod, dataScope, evasion, delay },
+  });
+
+  return {
+    content: [{ type: 'text' as const, text: summary }],
+  };
+}
+
 export function registerInjectDebuggerTool(server: McpServer): void {
   server.tool(
     'inject-debugger',
@@ -832,104 +944,9 @@ export function registerInjectDebuggerTool(server: McpServer): void {
       injectionPoint: z.enum(['start', 'end', 'auto']).default('auto')
         .describe('Where to inject the payload'),
     },
-    async ({ code, language, callbackUrl, payloadType, exfilMethod, dataScope, evasion, delay, injectionPoint }) => {
-      const validation = validateInput(callbackUrl);
-
-      logToolInvocation('inject-debugger', {
-        language, callbackUrl, payloadType, exfilMethod, dataScope, evasion, delay, injectionPoint,
-        codeLength: code.length
-      }, validation.warnings);
-
-      let sourceCode = code;
-      let detectedLanguage: SupportedLanguage | null = language || null;
-      let isFilePath = false;
-
-      // Check if code is a file path
-      try {
-        const stats = await fs.stat(code);
-        if (stats.isFile()) {
-          isFilePath = true;
-          sourceCode = await fs.readFile(code, 'utf-8');
-          if (!detectedLanguage) {
-            detectedLanguage = detectLanguageFromPath(code);
-          }
-        }
-      } catch {
-        // Not a file path, treat as raw code
-      }
-
-      if (!detectedLanguage) {
-        logOutput('inject-debugger', { success: false, error: 'Could not detect language' });
-        return {
-          isError: true,
-          content: [{ type: 'text' as const, text: 'Error: Could not detect language. Please specify the language parameter.' }],
-        };
-      }
-
-      const payload = generatePayload({
-        language: detectedLanguage,
-        type: payloadType,
-        url: callbackUrl,
-        method: exfilMethod,
-        scope: dataScope,
-        evasion,
-        delay,
-      });
-
-      const commentChar = commentChars[detectedLanguage];
-      const warningComment = WARNING_BANNER.split('\n')
-        .map(line => line ? `${commentChar} ${line}` : commentChar)
-        .join('\n');
-
-      let modifiedCode: string;
-
-      if (injectionPoint === 'start') {
-        modifiedCode = warningComment + '\n' + payload + '\n' + sourceCode;
-      } else if (injectionPoint === 'end') {
-        modifiedCode = sourceCode + '\n' + warningComment + '\n' + payload;
-      } else {
-        const insertPos = findInjectionPoint(sourceCode, detectedLanguage);
-        modifiedCode = sourceCode.slice(0, insertPos) + '\n' + warningComment + '\n' + payload + '\n' + sourceCode.slice(insertPos);
-      }
-
-      const summary = `# Debug Injection Complete
-
-## Configuration
-| Option | Value |
-|--------|-------|
-| **Language** | ${detectedLanguage} |
-| **Payload Type** | ${payloadType} |
-| **Callback URL** | ${callbackUrl} |
-| **Exfil Method** | ${exfilMethod} |
-| **Data Scope** | ${dataScope} |
-| **Evasion** | ${evasion} |
-| **Delay** | ${delay}ms |
-| **Injection Point** | ${injectionPoint} |
-| **Source** | ${isFilePath ? code : '(inline code)'} |
-
-## Warning
-**FOR AUTHORIZED LAB/RESEARCH USE ONLY**
-
-${payloadType === 'reverse-shell' ? '⚠️ This payload opens a reverse shell connection!' : ''}
-${dataScope === 'cloud' ? '⚠️ This payload attempts to access cloud metadata endpoints!' : ''}
-${evasion === 'advanced' ? '⚠️ This payload uses base64 encoding for evasion!' : ''}
-
-## Modified Code
-
-\`\`\`${detectedLanguage}
-${modifiedCode}
-\`\`\`
-`;
-
-      logOutput('inject-debugger', {
-        success: true,
-        summary: `Injected ${payloadType} payload (${exfilMethod}/${dataScope}/${evasion})`,
-        metrics: { language: detectedLanguage, payloadType, exfilMethod, dataScope, evasion, delay },
-      });
-
-      return {
-        content: [{ type: 'text' as const, text: summary }],
-      };
+    async (args) => {
+      return performInjection(args);
     }
   );
 }
+
